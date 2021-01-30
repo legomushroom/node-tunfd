@@ -5,6 +5,7 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 Napi::FunctionReference TunInterface::constructor;
 
@@ -17,6 +18,7 @@ void TunInterface::ReadOnlyProperty(const Napi::CallbackInfo &info, const Napi::
 Napi::Function TunInterface::Init(Napi::Env env) {
     Napi::Function func = DefineClass(env, "TunInterface", {
         InstanceMethod("setPersist", &TunInterface::SetPersist),
+        InstanceMethod("setAddress", &TunInterface::SetAddress),
         InstanceAccessor("name", &TunInterface::GetName, &TunInterface::ReadOnlyProperty),
         InstanceAccessor("fd", &TunInterface::GetFd, &TunInterface::ReadOnlyProperty)
     });
@@ -30,7 +32,7 @@ Napi::Function TunInterface::Init(Napi::Env env) {
 TunInterface::TunInterface(const Napi::CallbackInfo &info) : Napi::ObjectWrap<TunInterface>(info) {
     Napi::Env env = info.Env();
     Napi::Object options;
-    if (info.Length() < 1) options = Napi::Object::New(env); 
+    if (info.Length() < 1) options = Napi::Object::New(env);
     else {
         if (!info[0].IsObject()) {
             throwTypeError(env, "Argument should be an object");
@@ -103,6 +105,75 @@ Napi::Value TunInterface::SetPersist(const Napi::CallbackInfo &info) {
     if (!info[0].IsBoolean()) return throwTypeError(env, "Argument should be a boolean");
     int result = ioctl(fd, TUNSETPERSIST, (uintptr_t)(bool)info[0].As<Napi::Boolean>());
     if (result < 0) return throwError(env, "ioctl TUNSETPERSIST: " + (std::string)strerror(errno));
+    return info[0];
+}
+
+#define ifreq_offsetof(x)  offsetof(struct ifreq, x)
+
+Napi::Value TunInterface::SetAddress(const Napi::CallbackInfo &info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1) return throwTypeError(env, "Needs 2 arguments - \"IP\" and \"MASK\"");
+    if (!info[0].IsString()) return throwTypeError(env, "Argument should be a string");
+    // if (!info[1].IsString()) return throwTypeError(env, "Argument should be a string");
+
+    std::string IP_ADDR = info[0].As<Napi::String>();
+
+    struct ifreq ifr;
+    struct sockaddr_in sai;
+    int sockfd;
+    char *p;
+
+    /* Create a channel to the NET kernel. */
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+    /* get interface name */
+    strncpy(ifr.ifr_name, name.c_str(), IFNAMSIZ);
+
+    memset(&sai, 0, sizeof(struct sockaddr));
+    sai.sin_family = AF_INET;
+    sai.sin_port = 0;
+
+    sai.sin_addr.s_addr = inet_addr(IP_ADDR.c_str());
+
+    p = (char *) &sai;
+    memcpy( (((char *)&ifr + ifreq_offsetof(ifr_addr) )),
+                    p, sizeof(struct sockaddr));
+
+    ioctl(sockfd, SIOCSIFADDR, &ifr);
+    ioctl(sockfd, SIOCGIFFLAGS, &ifr);
+
+    ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
+    // ifr.ifr_flags &= ~selector;  // unset something
+
+    if (ioctl(sockfd, SIOCSIFFLAGS, &ifr) < 0) {
+        throwError(env, "ioctl SIOCSIFFLAGS: " + (std::string)strerror(errno));
+        return info[0];
+    }
+
+    // int fd;
+    // struct ifreq ifr;
+    // struct sockaddr_in *addr;
+
+    // /*AF_INET - to define IPv4 Address type.*/
+    // ifr.ifr_addr.sa_family = AF_INET;
+
+    // /*eth0 - define the ifr_name - port name
+    // where network attached.*/
+    // // memcpy(ifr.ifr_name, name, IFNAMSIZ-1);
+    // strncpy(ifr.ifr_name, name.c_str(), IFNAMSIZ-1);
+
+    // /*defining the sockaddr_in*/
+    // addr=(struct sockaddr_in *)&ifr.ifr_addr;
+
+    // // Napi::String ip;
+    // std::string ip = info[0].As<Napi::String>();
+
+    // /*convert ip address in correct format to write*/
+    // inet_pton(AF_INET, ip.c_str(), &addr->sin_addr);
+
+    // /*Setting the Ip Address using ioctl*/
+    // ioctl(fd, SIOCSIFADDR, &ifr);
+
     return info[0];
 }
 

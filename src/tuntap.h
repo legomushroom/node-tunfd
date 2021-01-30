@@ -18,6 +18,7 @@ private:
     Napi::Value GetName(const Napi::CallbackInfo &info);
     Napi::Value GetFd(const Napi::CallbackInfo &info);
     Napi::Value SetPersist(const Napi::CallbackInfo &info);
+    Napi::Value SetAddress(const Napi::CallbackInfo &info);
 };
 
 #endif
